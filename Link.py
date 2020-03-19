@@ -13,9 +13,3 @@ class Link: #https://github.com/adiazmont/optical-network-simulator/blob/master/
         self.src_node = src_node
         self.dst_node = dst_node
         self.bidirection = bidirection
-    
-    def length(self):
-        """
-        :return: link legth adding up span lengths in spans attribute
-        """
-        return sum(span.span.length for span in self.spans)
