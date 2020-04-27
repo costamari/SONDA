@@ -1,18 +1,31 @@
-from Topology import topo01, adj01
+import random
+from Topology import *
 from CallGenerator import Call
-from Dijkstra_RoutingAlgorithm import dijkstra
-
+from Dijkstra_RoutingAlgorithm import Dijkstra, ShortestDistance
+from FirstFit_ResourceAlgorithm import *
 
 def main():
         
         topology = input('Enter the network topology: ')    
         if topology == 'topo01':
-                n_nodes = len(topo01) 
+                n_nodes = len(adj01) - 1 
                 A = adj01
+                n_links = len(links01)
+                links = links01
+        elif topology == 'European':        
+                n_nodes = len(adjEuropean) - 1 
+                A = adjEuropean
+                n_links = len(linksEuropean)
+                links = linksEuropean
+        elif topology == 'Top1':
+                n_nodes = len(adjTop1) - 1 
+                A = adjTop1
+                n_links = len(linksTop1)
+                links = linksTop1
         else:
-                print('Error: The network topology entered is invalid.')
+                raise ValueError('The network topology entered is invalid.')
             
-        network_type = input('Enter the network type (WDM or EON): ')
+        network_type = str(input('Enter the network type (WDM or EON): '))
         if network_type == 'WDM' or network_type == 'EON':
 
                 n_fibers = int(input('Enter the number of fibers: '))
@@ -26,7 +39,7 @@ def main():
                 network_data.write('\nNumber of modes: ' + str(n_modes))
                 network_data.close()
         else:
-                print('Error: The network type entered is invalid.')
+                raise ValueError('The network type entered is invalid.')
 
         '''    
         tipo_de_trafego = input('Informe o tipo de tráfego (Estático, Incremental ou Dinâmico): ')
@@ -40,48 +53,75 @@ def main():
                 print('Erro: O tipo de tráfego informado é inválido.')
         '''
 
-        # --------------- Solicitação de chamadas ------------------
+        # --------------- Solicitação de chamadas e verifição de rotas e de recursos ------------------
 
-        n_calls = int(input('Enter the number of calls: '))                 # Refers to the number of simulated calls in the program
-        Lambda1 = float(input('Enter the average call arrival rate: '))     # Refers to the average arrival rate of calls according to a poissonian processo
-        Lambda2 = float(input('Enter the average call duration rate: '))    # Refers to the average call duration rate according to exponential distribution
-    
-        call = Call(n_nodes, Lambda1, Lambda2)
-        src_node = []
-        dst_node = []
-        bit_rate = []
-        arrival_time = []
-        duration_time = []
-        current_time = [0] * n_calls
-        ending_time = [0] * n_calls
-        
-        for i in range(n_calls): 
-                src_node.append(call.Src())
-                dst_node.append(call.Dst())
-                bit_rate.append(call.BitRate())
-                arrival_time.append(call.ArrivalTime())
-                duration_time.append(call.DurationTime())
-                                
-                if i == 0: 
-                        current_time[i] = arrival_time[i]
-                else:        
-                        current_time[i] = current_time[i-1] + arrival_time[i]                      
-
-                ending_time[i] = current_time[i] + duration_time[i]                                            
-                                                                
-        print('Source nodes list:', src_node)           
-        print('Destination nodes list:', dst_node)
-        print('Bit rates list:', bit_rate)
-        print('Arrival times list:', arrival_time)
-        print('Duration times list:', duration_time)             
-        print('Current times list:', current_time)
-        print('Ending times list:', ending_time)    
-   
-        # --------------- Verificando se tem rota ------------------
-
-        for i in range(n_calls):                         
-                print('Route', i+1)
-                dijkstra(A, src_node[i], dst_node[i])
+        n_calls = int(input('Enter the number of calls: '))             # Refers to the number of simulated calls in the program
+        min_traffic_load = int(input('Enter the min. traffic load: '))    
+        max_traffic_load = int(input('Enter the max. traffic load: '))
+        step = int(input('Enter the step: '))                 
                 
+        wave, time = generate(n_nodes, links)
+        blocked = []
+        # print('Load - Blocking probability')        
+        
+        for load in range(min_traffic_load, max_traffic_load, step):
+                
+                # call requests arrival
+                N = wave.copy()
+                T = time.copy() # holding time
+                count_block = 0                           
+
+                random.seed(0)
+                call = Call(n_nodes, load, 1)
+                src_node = []
+                dst_node = []
+                bit_rate = []
+                arrival_time = []
+                duration_time = []
+                current_time = [0] * n_calls
+                # ending_time = [0] * n_calls
+                interarrival = [0] * n_calls
+                
+                for gen in range(n_calls):
+                        src_node.append(call.Src())
+                        dst_node.append(call.Dst())
+                        bit_rate.append(call.BitRate())
+                        arrival_time.append(round(call.ArrivalTime(), 6))
+                        duration_time.append(round(call.DurationTime(), 6))
+                                                                
+                        if gen == 0: 
+                                current_time[gen] = arrival_time[gen]
+                        else:        
+                                current_time[gen] = current_time[gen-1] + arrival_time[gen]                     
+
+                        # ending_time[gen] = round(current_time[gen] + duration_time[gen], 4)
+
+                for gen in range(n_calls):
+
+                        if gen == n_calls-1:
+                                interarrival[gen] = 0
+                        else:
+                                interarrival[gen] = current_time[gen+1] - current_time[gen]
+                        			
+                        route = Dijkstra(A, src_node[gen], dst_node[gen])                
+                
+                        count_block += first_fit(N, T, route, duration_time[gen])
+
+                        # Atualiza todos os canais que ainda estao sendo usados 
+                        for link in links:
+                                i, j = link
+                                for w in range(num_channels):
+					# Dijkstra + First-fit
+                                        if T[i][j][w] > interarrival[gen]:
+                                                T[i][j][w] -= interarrival[gen]
+                                        else:
+                                                T[i][j][w] = 0
+                                                if not N[i][j][w]:
+                                                        N[i][j][w] = 1 # free channel                                                                              	
+
+                blocked.append(count_block/n_calls)               
+
+        print(blocked)       
+
 if __name__ == '__main__':
     main()
